@@ -3,7 +3,7 @@
 ## What is it?
 A simple Python script that leverages a JSN-SRO4T 2.0 waterproof ultrasonic sensor module, connected to a Raspberry Pi, which broadcasts the results of the measurements using an MQTT broker.
 
-The measurements do need to take place in an enclosed container (cubic or cylindrical) containing a certain liquid. The sensor is mounted at the top of the container and is measuring the distance between the sensor and surface of the liquid at a specified interval. Based upon the measured distance and the container inner dimensions, the volume is also calculated.
+The measurements do need to take place in an enclosed container (cubic or cylindrical) containing a certain liquid. The sensor is mounted at the top of the container and is measuring the distance between the sensor and surface of the liquid at a specified interval. Based upon the measured distance (expressed in centimeters) and the container inner dimensions, the volume (expressed in liters) is also calculated.
 
 ## What is needed?
 * Raspberry Pi, with GPIO 14 & 15 pins available.

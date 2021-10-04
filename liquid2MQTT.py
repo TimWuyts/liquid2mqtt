@@ -4,12 +4,12 @@ import configparser
 import argparse
 import sys
 import json
-import string
+import math
 import os
 import time
 
 parser = argparse.ArgumentParser(description="Water well level measurement")
-parser.add_argument("--config", dest="config", help="Path to config file", default=os.path.dirname(os.path.realpath(__file__))+os.path.sep+"settings.ini")
+parser.add_argument("--config", dest="config", help="Path to config file", default=os.path.dirname(os.path.realpath(__file__)) + os.path.sep + "settings.ini")
 parser.add_argument("--verbose", dest="verbose", help="Display feedback")
 
 args = parser.parse_args()
@@ -47,21 +47,48 @@ class Liquid2MQTT:
 
     # run the script, until interrupted using CTRL + C
     def run(self):
-        self.last_status = { "distance": -1 }
+        container_length = self.config["CONTAINER"]["LENGTH"]
+        container_width = float(self.config["CONTAINER"]["WIDTH"])
+        container_height = float(self.config["CONTAINER"]["HEIGHT"])
+
+        # calculating maximum volume in cubic centimeters converted to liters
+        if (not container_length):
+            # cylindrical container
+            max_volume = (math.pow((container_width / 2), 2) * math.pi * container_height) / 1000
+        else: 
+            # rectangular container
+            container_length = float(container_length)
+            max_volume = (container_length * container_width * container_height) / 1000
+
+        self.last_status = self.status_object(-1, -1, container_height, -1, max_volume)
         
         try:
             while True:
-                distance = self.measure()
+                raw_distance = self.measure()
 
-                if (distance > -1):
+                if (raw_distance > -1):
+                    # calculating distance
+                    distance = raw_distance - float(self.config["SENSOR"]["OFFSET"])
+                    level = container_height - distance
+                    
+                    # calculating volume in cubic centimeters converted to liters
+                    if (not container_length):
+                        # cylindrical container
+                        volume = (math.pow((container_width / 2), 2) * math.pi * level) / 1000
+                    else: 
+                        # rectangular container
+                        volume = (container_length * container_width * level) / 1000
+
                     if self.verbose: 
-                        print("Measured distance = %.1f cm" % distance)
+                        print("Measured distance = {0:.1f} cm".format(distance))
+                        print("Current level = {0:.1f} cm (with maximum level = {1:.1f} cm)".format(level, container_height))
+                        print("Current volume = {0:.1f} liters (with maximum volume = {1:.1f} liters)".format(volume, max_volume))
+                    
+                    self.mqtt_update_status(self.status_object(distance, level, container_height, volume, max_volume))
                 else:
                     if self.verbose:
-                        print("Nothing measured")
-                
-                self.mqtt_update_status({ "distance": distance })
-                
+                        print("Measurement failed")
+
                 time.sleep(float(self.config["DEFAULT"]["INTERVAL"]))
         except KeyboardInterrupt:
             print("Measurement stopped")
@@ -94,11 +121,24 @@ class Liquid2MQTT:
 
         if (stop <= timeout):
             elapsed = stop - start
+
+            # distance = (time elapsed x speed of sound) divided by 2  
             distance = float(elapsed * 34300) / 2.0
         else:
             return -1
         
         return distance
+
+    def status_object(self, distance, level, max_level, volume, max_volume):
+        format = "%.1f"
+
+        return { 
+            "current_distance": format % distance, 
+            "current_level": format % level, 
+            "max_level": format % max_level, 
+            "current_volume": format % volume, 
+            "max_volume": format % max_volume 
+        }
     
     def mqtt_start(self):
         def on_connect(client, userdata, flags, rc):
