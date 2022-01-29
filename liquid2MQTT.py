@@ -44,6 +44,7 @@ class Liquid2MQTT:
 
         self.mqtt_start()
         self.run()
+        self.mqtt_stop()
 
     # run the script, until interrupted using CTRL + C
     def run(self):
@@ -62,37 +63,47 @@ class Liquid2MQTT:
 
         self.last_status = self.status_object(-1, -1, container_height, -1, max_volume)
         
-        try:
-            while True:
-                raw_distance = self.measure()
+        # run measurements
+        i = 1
+        list = []
+        while i < 4:
+            measurement = self.measure()
 
-                if (raw_distance > -1):
-                    # calculating distance
-                    distance = raw_distance - float(self.config["SENSOR"]["OFFSET"])
-                    level = container_height - distance
-                    
-                    # calculating volume in cubic centimeters converted to liters
-                    if (not container_length):
-                        # cylindrical container
-                        volume = (math.pow((container_width / 2), 2) * math.pi * level) / 1000
-                    else: 
-                        # rectangular container
-                        volume = (container_length * container_width * level) / 1000
+            if self.verbose:
+                print("Measurement", i, "with result:", measurement)
 
-                    if self.verbose: 
-                        print("Measured distance = {0:.1f} cm".format(distance))
-                        print("Current level = {0:.1f} cm (with maximum level = {1:.1f} cm)".format(level, container_height))
-                        print("Current volume = {0:.1f} liters (with maximum volume = {1:.1f} liters)".format(volume, max_volume))
-                    
-                    self.mqtt_update_status(self.status_object(distance, level, container_height, volume, max_volume))
-                else:
-                    if self.verbose:
-                        print("Measurement failed")
+            if (measurement > -1):
+                list.append(measurement)
+            else:
+                time.sleep(3)
+                self.run()
 
-                time.sleep(float(self.config["DEFAULT"]["INTERVAL"]))
-        except KeyboardInterrupt:
-            print("Measurement stopped")
-            GPIO.cleanup()
+            i+=1
+            time.sleep(3)
+        
+        # attempt to remove wrong measurements
+        list.remove(max(list))
+        list.remove(min(list))
+        raw_distance = list[0]
+
+        # calculating actual distance
+        distance = raw_distance - float(self.config["SENSOR"]["OFFSET"])
+        level = container_height - distance
+        
+        # calculating volume in cubic centimeters converted to liters
+        if (not container_length):
+            # cylindrical container
+            volume = (math.pow((container_width / 2), 2) * math.pi * level) / 1000
+        else: 
+            # rectangular container
+            volume = (container_length * container_width * level) / 1000
+
+        if self.verbose: 
+            print("Measured distance = {0:.1f} cm".format(distance))
+            print("Current level = {0:.1f} cm (with maximum level = {1:.1f} cm)".format(level, container_height))
+            print("Current volume = {0:.1f} liters (with maximum volume = {1:.1f} liters)".format(volume, max_volume))
+        
+        self.mqtt_update_status(self.status_object(distance, level, container_height, volume, max_volume))
 
     # measure the distance from the sensor to the surface
     def measure(self):
@@ -122,8 +133,8 @@ class Liquid2MQTT:
         if (stop <= timeout):
             elapsed = stop - start
 
-            # distance = (time elapsed x speed of sound) divided by 2  
-            distance = float(elapsed * 34300) / 2.0
+            # distance = time elapsed x (speed of sound divided by 2)
+            distance = float(elapsed) * (34300 / 2)
         else:
             return -1
         
@@ -145,7 +156,7 @@ class Liquid2MQTT:
             self.mqtt_update_status(self.last_status)
 
             if self.verbose:
-                print("Connected to MQTT broker at ", self.config["MQTT"]["HOST"])
+                print("Connected to MQTT broker at", self.config["MQTT"]["HOST"])
 
         self.mqtt = mqttc.Client()
         self.mqtt.on_connect = on_connect
@@ -161,6 +172,13 @@ class Liquid2MQTT:
 
         self.mqtt.connect(str(self.config["MQTT"]["HOST"]), int(self.config["MQTT"]["PORT"]), 60)
         self.mqtt.loop_start()
+    
+    def mqtt_stop(self):
+        self.mqtt.loop_stop()
+        self.mqtt.disconnect()
+
+        if self.verbose:
+            print("Disconnected from MQTT broker")
     
     def mqtt_update_status(self, update):
         new_status = dict(self.last_status, **update)
